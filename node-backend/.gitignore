@@ -1,0 +1,12 @@
+# General Ignore
+# -------------------------
+.env
+*.log
+firebase-service-key.json
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+node_modules/
