@@ -176,7 +176,7 @@ export const markAttendance = async (req, res) => {
     };
 
     try {
-      response = await retryAxios("http://localhost:5001/verify-face", form, {
+      response = await retryAxios("http://face-service-j883.onrender.com/verify-face", form, {
         headers: {
           ...form.getHeaders(),
           "Content-Length": formLength,
@@ -185,7 +185,7 @@ export const markAttendance = async (req, res) => {
       console.log("Face recognition response:", response.data);
     } catch (error) {
       if (error.code === 'ECONNREFUSED') {
-        console.error("Face recognition service is unavailable at http://localhost:5001");
+        console.error("Face recognition service is unavailable at https://face-service-j883.onrender.com");
         return res.status(503).json({ message: "Face recognition service is unavailable. Please try again later." });
       }
       console.error("Error from face recognition service:", error.response?.data || error.message);
