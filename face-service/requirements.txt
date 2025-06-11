@@ -4,3 +4,5 @@ deepface
 numpy
 requests
 gunicorn
+tensorflow==2.15.0
+tf-keras==2.15.0
