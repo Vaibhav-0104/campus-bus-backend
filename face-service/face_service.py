@@ -121,18 +121,20 @@ import tempfile
 
 app = Flask(__name__)
 UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Logging
+# ✅ Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Health check
+# ✅ Ensure uploads folder exists
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ✅ Health check route
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ Face Service is Live!", 200
+    return "✅ Face Service is Live!"
 
-# Resize utility
+# ✅ Resize image
 def resize_image(image_path, max_size=(224, 224)):
     try:
         with Image.open(image_path) as img:
@@ -142,48 +144,47 @@ def resize_image(image_path, max_size=(224, 224)):
             img.save(temp_path, "JPEG", quality=85)
             return temp_path
     except Exception as e:
-        logger.error(f"❌ Failed to resize image {image_path}: {str(e)}")
+        logger.error(f"Image resize failed: {e}")
         return None
 
-@app.route("/verify-face", methods=["POST"])
-def verify_face():
-    logger.info("📥 Received /verify-face request")
-
+# ✅ Save student image from Node backend
+@app.route("/save-student-image", methods=["POST"])
+def save_student_image():
     uploaded_file = request.files.get("image")
     if not uploaded_file:
-        logger.error("❌ No file uploaded in form-data")
         return jsonify({"error": "No file uploaded"}), 400
 
-    # Save uploaded image
+    save_path = os.path.join(UPLOAD_DIR, uploaded_file.filename)
+    uploaded_file.save(save_path)
+    logger.info(f"✅ Saved student image: {save_path}")
+    return jsonify({"message": "Image saved successfully"}), 200
+
+# ✅ Main face verification
+@app.route("/verify-face", methods=["POST"])
+def verify_face():
+    uploaded_file = request.files.get("image")
+    if not uploaded_file:
+        return jsonify({"error": "No file uploaded"}), 400
+
     temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
     uploaded_path = os.path.join(UPLOAD_DIR, temp_filename)
     uploaded_file.save(uploaded_path)
-    logger.info(f"🖼 Uploaded image saved: {uploaded_path}")
 
     resized_uploaded_path = resize_image(uploaded_path)
     if not resized_uploaded_path:
-        return jsonify({"error": "Failed to resize uploaded image"}), 400
+        return jsonify({"error": "Invalid uploaded image"}), 400
 
     try:
         student_images = [
             os.path.join(UPLOAD_DIR, f)
             for f in os.listdir(UPLOAD_DIR)
-            if f != temp_filename and f.lower().endswith((".jpg", ".jpeg", ".png"))
+            if f.lower().endswith(('.jpg', '.jpeg', '.png')) and f != temp_filename
         ]
-
-        logger.info(f"🔍 Found {len(student_images)} student images for comparison")
 
         for student_path in student_images:
             resized_student = resize_image(student_path)
             if not resized_student:
-                logger.warning(f"⚠️ Skipping invalid student image: {student_path}")
                 continue
-
-            if not os.path.exists(resized_uploaded_path) or not os.path.exists(resized_student):
-                logger.warning("⚠️ One of the images missing before verification")
-                continue
-
-            logger.info(f"🧠 Comparing: {resized_uploaded_path} ↔ {resized_student}")
 
             try:
                 result = DeepFace.verify(
@@ -193,16 +194,9 @@ def verify_face():
                     detector_backend="opencv",
                     enforce_detection=False,
                 )
-                logger.info(f"📊 Result: {result}")
-
                 if result.get("verified"):
                     student_filename = os.path.basename(student_path)
-                    logger.info(f"✅ Match found: {student_filename}")
                     return jsonify({"verified": True, "studentImage": student_filename})
-
-            except Exception as e:
-                logger.error(f"❌ DeepFace crashed on compare: {e}")
-
             finally:
                 if os.path.exists(resized_student):
                     os.remove(resized_student)
@@ -210,16 +204,14 @@ def verify_face():
         return jsonify({"verified": False, "message": "Face not recognized"}), 404
 
     except Exception as e:
-        logger.exception("🔥 Unhandled exception in /verify-face")
+        logger.exception("Face verification failed")
         return jsonify({"error": str(e)}), 500
-
     finally:
         if os.path.exists(uploaded_path):
             os.remove(uploaded_path)
-        if os.path.exists(resized_uploaded_path):
+        if resized_uploaded_path and os.path.exists(resized_uploaded_path):
             os.remove(resized_uploaded_path)
 
-# Run app on port 8000 (Render requirement)
 if __name__ == "__main__":
-    logger.info("🚀 Starting face-service Flask app")
+    logger.info("🚀 Starting Flask face-service on port 8000")
     app.run(host="0.0.0.0", port=8000, threaded=True)

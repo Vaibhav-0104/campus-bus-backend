@@ -6,19 +6,38 @@ import path from "path";
 import bcrypt from "bcrypt";
 import FormData from "form-data";
 
+// ✅ Create student and send image to face-service
 export const createStudent = async (req, res) => {
   try {
     const { envNumber, name, email, password, department, mobile, parentContact } = req.body;
-
-    if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact) {
+    if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact)
       return res.status(400).json({ message: "All fields are required" });
-    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const imagePath = req.file ? `../face-service/uploads/${req.file.filename}` : "";
 
     const student = new Student({ envNumber, name, email, password: hashedPassword, department, mobile, parentContact, imagePath });
     await student.save();
+
+    // ✅ Send student image to face-service
+    if (req.file) {
+      const form = new FormData();
+      form.append("image", fs.createReadStream(req.file.path), {
+        filename: req.file.filename,
+        contentType: req.file.mimetype,
+      });
+
+      try {
+        await axios.post("https://face-service-j883.onrender.com/save-student-image", form, {
+          headers: form.getHeaders(),
+          timeout: 15000,
+        });
+        console.log("✅ Synced image to face-service");
+      } catch (err) {
+        console.error("❌ Failed to sync image to face-service:", err.message);
+      }
+    }
+
     res.status(201).json(student);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -122,42 +141,12 @@ export const loginStudent = async (req, res) => {
   }
 };
 
+// ✅ Mark attendance with retries
 export const markAttendance = async (req, res) => {
-  let tempFilePath = null;
-
-  const waitUntilFaceServiceIsReady = async (url, retries = 6, delay = 5000) => {
-    for (let i = 0; i < retries; i++) {
-      try {
-        const res = await axios.get(url, { timeout: 5000 });
-        if (res.status === 200 || res.status === 404) {
-          console.log("✅ face-service is ready");
-          return;
-        }
-      } catch (e) {
-        console.warn(`🕒 Waiting for face-service... retry ${i + 1}/${retries}`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
-    throw new Error("❌ face-service did not start in time");
-  };
-
+  const tempFilePath = req.file?.path;
   try {
-    if (!req.file) {
-      console.error("No file received in request");
-      return res.status(400).json({ message: "Image is required" });
-    }
-
-    tempFilePath = req.file.path;
-    console.log(`📸 Processing file: ${tempFilePath}, size: ${req.file.size} bytes`);
-
-    if (!fs.existsSync(tempFilePath)) {
-      return res.status(400).json({ message: "Uploaded file is missing or inaccessible" });
-    }
-
-    const fileContent = fs.readFileSync(tempFilePath);
-    if (fileContent.length === 0) {
-      return res.status(400).json({ message: "Uploaded file is empty" });
-    }
+    if (!req.file) return res.status(400).json({ message: "Image is required" });
+    if (!fs.existsSync(tempFilePath)) return res.status(400).json({ message: "File not found" });
 
     const form = new FormData();
     form.append("image", fs.createReadStream(tempFilePath), {
@@ -165,52 +154,47 @@ export const markAttendance = async (req, res) => {
       contentType: req.file.mimetype || "image/jpeg",
     });
 
-    const formLength = await new Promise((resolve, reject) => {
-      form.getLength((err, length) => (err ? reject(err) : resolve(length)));
-    });
+    // ✅ Check if face-service is awake
+    try {
+      await axios.get("https://face-service-j883.onrender.com/", { timeout: 5000 });
+    } catch (err) {
+      console.warn("⚠️ Face-service may still be waking up...");
+    }
 
-    const FACE_SERVICE_URL = "https://face-service-j883.onrender.com/verify-face";
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Allow warm-up
 
-    console.log("⏳ Checking if face-service is ready...");
-    await waitUntilFaceServiceIsReady("https://face-service-j883.onrender.com/", 12, 5000); // 12 retries × 5s = 60s
-
-
-    console.log("🚀 Sending image to face-service...");
-    const response = await axios.post(FACE_SERVICE_URL, form, {
-      headers: {
-        ...form.getHeaders(),
-        "Content-Length": formLength,
-      },
-      timeout: 30000,
-    });
+    // ✅ Retry request to /verify-face
+    let response;
+    for (let i = 0; i < 3; i++) {
+      try {
+        response = await axios.post("https://face-service-j883.onrender.com/verify-face", form, {
+          headers: form.getHeaders(),
+          timeout: 30000,
+        });
+        break;
+      } catch (err) {
+        if (i === 2) throw err;
+        console.warn(`Retry ${i + 1}/3 for face-service`);
+        await new Promise(res => setTimeout(res, 3000));
+      }
+    }
 
     const { verified, studentImage } = response.data;
-
-    if (!verified) {
-      console.log("🙅 Face not recognized");
-      return res.status(404).json({ message: "Face not recognized" });
-    }
+    if (!verified) return res.status(404).json({ message: "Face not recognized" });
 
     const matchedStudent = await Student.findOne({
       imagePath: `../face-service/uploads/${studentImage}`,
     });
-
-    if (!matchedStudent) {
-      return res.status(404).json({ message: "Student not found for the matched image" });
-    }
+    if (!matchedStudent) return res.status(404).json({ message: "Matched student not found" });
 
     const today = new Date();
-    const attendanceExists = await Attendance.findOne({
+    const alreadyMarked = await Attendance.findOne({
       studentId: matchedStudent._id,
-      date: {
-        $gte: new Date(today.setHours(0, 0, 0, 0)),
-        $lt: new Date(today.setHours(23, 59, 59, 999)),
-      },
+      date: { $gte: new Date(today.setHours(0, 0, 0, 0)), $lt: new Date(today.setHours(23, 59, 59, 999)) },
     });
 
-    if (attendanceExists) {
-      return res.status(400).json({ message: "Attendance already marked for today" });
-    }
+    if (alreadyMarked)
+      return res.status(400).json({ message: "Attendance already marked today" });
 
     const attendance = await Attendance.create({
       studentId: matchedStudent._id,
@@ -218,27 +202,21 @@ export const markAttendance = async (req, res) => {
       status: "Present",
     });
 
-    console.log(`✅ Attendance marked for student: ${matchedStudent.name}`);
     res.status(200).json({
       message: "Attendance marked successfully",
       student: matchedStudent.name,
       attendanceId: attendance._id,
     });
-  } catch (err) {
-    console.error("❌ Error in markAttendance:", err.message, err.stack);
-    res.status(500).json({ message: `Internal server error: ${err.message}` });
+  } catch (error) {
+    console.error("❌ markAttendance error:", error.message);
+    res.status(500).json({ message: `Face recognition error: ${error.message}` });
   } finally {
     if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath);
-        console.log(`🧹 Cleaned up: ${tempFilePath}`);
-      } catch (cleanupErr) {
-        console.error(`Error cleaning up file ${tempFilePath}:`, cleanupErr.message);
-      }
+      fs.unlinkSync(tempFilePath);
+      console.log("🧹 Temp file cleaned up");
     }
   }
 };
-
 
 export const getAttendanceByDate = async (req, res) => {
   try {
