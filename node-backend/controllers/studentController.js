@@ -158,40 +158,50 @@ export const markAttendance = async (req, res) => {
     });
     console.log(`FormData size: ${formLength} bytes`);
 
-    console.log("Sending request to face recognition service");
-    let response;
-    const retryAxios = async (url, data, config, retries = 3, delay = 1000) => {
+    console.log("Sending request to face recognition service...");
+
+    const retryAxios = async (url, data, config, retries = 3, delay = 2000) => {
       for (let i = 0; i < retries; i++) {
         try {
           return await axios.post(url, data, config);
         } catch (error) {
-          if ((error.code === 'ECONNREFUSED' || error.response?.status >= 500) && i < retries - 1) {
+          const shouldRetry =
+            error.code === "ECONNREFUSED" ||
+            error.code === "ECONNABORTED" ||
+            error.response?.status >= 500;
+
+          if (shouldRetry && i < retries - 1) {
             console.warn(`Retry ${i + 1}/${retries} for ${url}`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
+          } else {
+            throw error;
           }
-          throw error;
         }
       }
     };
 
+    const FACE_SERVICE_URL = "https://face-service-j883.onrender.com/verify-face"; // ✅ HTTPS and correct path
+    let response;
+
     try {
-      response = await retryAxios("https://face-service-j883.onrender.com/verify-face", form, {
+      response = await retryAxios(FACE_SERVICE_URL, form, {
         headers: {
           ...form.getHeaders(),
           "Content-Length": formLength,
         },
+        timeout: 30000, // ✅ Handle cold starts
       });
+
       console.log("Face recognition response:", response.data);
     } catch (error) {
-      if (error.code === 'ECONNREFUSED') {
-        console.error("Face recognition service is unavailable at https://face-service-j883.onrender.com");
-        return res.status(503).json({ message: "Face recognition service is unavailable. Please try again later." });
-      }
-      console.error("Error from face recognition service:", error.response?.data || error.message);
-      return res.status(error.response?.status || 500).json({
-        message: `Face recognition error: ${error.response?.data?.error || error.message}`,
-      });
+      const statusCode = error.response?.status || 500;
+      const errorMsg =
+        error.response?.data?.error ||
+        error.message ||
+        "Face recognition service error";
+
+      console.error("❌ Error from face recognition service:", errorMsg);
+      return res.status(statusCode).json({ message: `Face recognition error: ${errorMsg}` });
     }
 
     const { verified, studentImage } = response.data;
@@ -227,19 +237,19 @@ export const markAttendance = async (req, res) => {
       status: "Present",
     });
 
-    console.log(`Attendance marked for student: ${matchedStudent.name}`);
+    console.log(`✅ Attendance marked for student: ${matchedStudent.name}`);
     res.status(200).json({
       message: "Attendance marked successfully",
       student: matchedStudent.name,
       attendanceId: attendance._id,
     });
   } catch (err) {
-    console.error("Error in markAttendance:", err.message, err.stack);
+    console.error("❌ Error in markAttendance:", err.message, err.stack);
     res.status(500).json({ message: `Internal server error: ${err.message}` });
   } finally {
     if (tempFilePath && fs.existsSync(tempFilePath)) {
       try {
-        console.log(`Cleaning up file: ${tempFilePath}`);
+        console.log(`🧹 Cleaning up file: ${tempFilePath}`);
         fs.unlinkSync(tempFilePath);
       } catch (cleanupErr) {
         console.error(`Error cleaning up file ${tempFilePath}:`, cleanupErr.message);
