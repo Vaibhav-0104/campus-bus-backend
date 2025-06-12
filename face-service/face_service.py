@@ -213,5 +213,6 @@ def verify_face():
             os.remove(resized_uploaded_path)
 
 if __name__ == "__main__":
-    logger.info("🚀 Starting Flask face-service on port 8000")
-    app.run(host="0.0.0.0", port=8000, threaded=True)
+    logger.info("🚀 Starting Flask face-service")
+    PORT = int(os.environ.get("PORT", 8000))  # Render sets PORT env var
+    app.run(host="0.0.0.0", port=PORT, threaded=True)
