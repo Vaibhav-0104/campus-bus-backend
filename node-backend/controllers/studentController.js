@@ -124,6 +124,7 @@ export const loginStudent = async (req, res) => {
 
 export const markAttendance = async (req, res) => {
   let tempFilePath = null;
+
   try {
     if (!req.file) {
       console.error("No file received in request");
@@ -158,8 +159,19 @@ export const markAttendance = async (req, res) => {
     });
     console.log(`FormData size: ${formLength} bytes`);
 
-    console.log("Sending request to face recognition service...");
+    // ✅ Wake up the Render face-service before sending actual request
+    console.log("⏳ Pinging face-service to wake it up...");
+    try {
+      await axios.get("https://face-service-j883.onrender.com/", { timeout: 5000 });
+      console.log("✅ Face-service responded to ping");
+    } catch (err) {
+      console.warn("⚠️ Face-service may still be waking up...");
+    }
 
+    // ✅ Delay to allow full startup
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // ✅ Retry logic for DeepFace POST
     const retryAxios = async (url, data, config, retries = 3, delay = 2000) => {
       for (let i = 0; i < retries; i++) {
         try {
@@ -168,6 +180,7 @@ export const markAttendance = async (req, res) => {
           const shouldRetry =
             error.code === "ECONNREFUSED" ||
             error.code === "ECONNABORTED" ||
+            error.code === "ETIMEDOUT" ||
             error.response?.status >= 500;
 
           if (shouldRetry && i < retries - 1) {
@@ -180,7 +193,7 @@ export const markAttendance = async (req, res) => {
       }
     };
 
-    const FACE_SERVICE_URL = "https://face-service-j883.onrender.com/verify-face"; // ✅ HTTPS and correct path
+    const FACE_SERVICE_URL = "https://face-service-j883.onrender.com/verify-face";
     let response;
 
     try {
@@ -189,7 +202,7 @@ export const markAttendance = async (req, res) => {
           ...form.getHeaders(),
           "Content-Length": formLength,
         },
-        timeout: 30000, // ✅ Handle cold starts
+        timeout: 30000, // ⏰ Render can take up to 30s on cold start
       });
 
       console.log("Face recognition response:", response.data);
@@ -211,7 +224,10 @@ export const markAttendance = async (req, res) => {
       return res.status(404).json({ message: "Face not recognized" });
     }
 
-    const matchedStudent = await Student.findOne({ imagePath: `../face-service/uploads/${studentImage}` });
+    const matchedStudent = await Student.findOne({
+      imagePath: `../face-service/uploads/${studentImage}`,
+    });
+
     if (!matchedStudent) {
       console.log(`No student found for image: ${studentImage}`);
       return res.status(404).json({ message: "Student not found for the matched image" });
