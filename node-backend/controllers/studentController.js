@@ -172,7 +172,8 @@ export const markAttendance = async (req, res) => {
     const FACE_SERVICE_URL = "https://face-service-j883.onrender.com/verify-face";
 
     console.log("⏳ Checking if face-service is ready...");
-    await waitUntilFaceServiceIsReady("https://face-service-j883.onrender.com");
+    await waitUntilFaceServiceIsReady("https://face-service-j883.onrender.com/", 12, 5000); // 12 retries × 5s = 60s
+
 
     console.log("🚀 Sending image to face-service...");
     const response = await axios.post(FACE_SERVICE_URL, form, {
