@@ -176,7 +176,7 @@ export const markAttendance = async (req, res) => {
     };
 
     try {
-      response = await retryAxios("http://face-service-j883.onrender.com/verify-face", form, {
+      response = await retryAxios("https://face-service-j883.onrender.com/verify-face", form, {
         headers: {
           ...form.getHeaders(),
           "Content-Length": formLength,
