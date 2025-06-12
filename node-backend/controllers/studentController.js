@@ -169,7 +169,7 @@ export const markAttendance = async (req, res) => {
       try {
         response = await axios.post("https://face-service-j883.onrender.com/verify-face", form, {
           headers: form.getHeaders(),
-          timeout: 30000,
+          timeout: 60000,
         });
         break;
       } catch (err) {
