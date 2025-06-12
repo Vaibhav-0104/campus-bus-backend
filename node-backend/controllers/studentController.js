@@ -125,6 +125,22 @@ export const loginStudent = async (req, res) => {
 export const markAttendance = async (req, res) => {
   let tempFilePath = null;
 
+  const waitUntilFaceServiceIsReady = async (url, retries = 6, delay = 5000) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await axios.get(url, { timeout: 5000 });
+        if (res.status === 200 || res.status === 404) {
+          console.log("✅ face-service is ready");
+          return;
+        }
+      } catch (e) {
+        console.warn(`🕒 Waiting for face-service... retry ${i + 1}/${retries}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw new Error("❌ face-service did not start in time");
+  };
+
   try {
     if (!req.file) {
       console.error("No file received in request");
@@ -132,16 +148,14 @@ export const markAttendance = async (req, res) => {
     }
 
     tempFilePath = req.file.path;
-    console.log(`Processing file: ${tempFilePath}, size: ${req.file.size} bytes`);
+    console.log(`📸 Processing file: ${tempFilePath}, size: ${req.file.size} bytes`);
 
     if (!fs.existsSync(tempFilePath)) {
-      console.error(`File not found at: ${tempFilePath}`);
       return res.status(400).json({ message: "Uploaded file is missing or inaccessible" });
     }
 
     const fileContent = fs.readFileSync(tempFilePath);
     if (fileContent.length === 0) {
-      console.error(`File is empty: ${tempFilePath}`);
       return res.status(400).json({ message: "Uploaded file is empty" });
     }
 
@@ -152,75 +166,27 @@ export const markAttendance = async (req, res) => {
     });
 
     const formLength = await new Promise((resolve, reject) => {
-      form.getLength((err, length) => {
-        if (err) reject(err);
-        resolve(length);
-      });
+      form.getLength((err, length) => (err ? reject(err) : resolve(length)));
     });
-    console.log(`FormData size: ${formLength} bytes`);
-
-    // ✅ Wake up the Render face-service before sending actual request
-    console.log("⏳ Pinging face-service to wake it up...");
-    try {
-      await axios.get("https://face-service-j883.onrender.com/", { timeout: 5000 });
-      console.log("✅ Face-service responded to ping");
-    } catch (err) {
-      console.warn("⚠️ Face-service may still be waking up...");
-    }
-
-    // ✅ Delay to allow full startup
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // ✅ Retry logic for DeepFace POST
-    const retryAxios = async (url, data, config, retries = 3, delay = 2000) => {
-      for (let i = 0; i < retries; i++) {
-        try {
-          return await axios.post(url, data, config);
-        } catch (error) {
-          const shouldRetry =
-            error.code === "ECONNREFUSED" ||
-            error.code === "ECONNABORTED" ||
-            error.code === "ETIMEDOUT" ||
-            error.response?.status >= 500;
-
-          if (shouldRetry && i < retries - 1) {
-            console.warn(`Retry ${i + 1}/${retries} for ${url}`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          } else {
-            throw error;
-          }
-        }
-      }
-    };
 
     const FACE_SERVICE_URL = "https://face-service-j883.onrender.com/verify-face";
-    let response;
 
-    try {
-      response = await retryAxios(FACE_SERVICE_URL, form, {
-        headers: {
-          ...form.getHeaders(),
-          "Content-Length": formLength,
-        },
-        timeout: 30000, // ⏰ Render can take up to 30s on cold start
-      });
+    console.log("⏳ Checking if face-service is ready...");
+    await waitUntilFaceServiceIsReady("https://face-service-j883.onrender.com");
 
-      console.log("Face recognition response:", response.data);
-    } catch (error) {
-      const statusCode = error.response?.status || 500;
-      const errorMsg =
-        error.response?.data?.error ||
-        error.message ||
-        "Face recognition service error";
-
-      console.error("❌ Error from face recognition service:", errorMsg);
-      return res.status(statusCode).json({ message: `Face recognition error: ${errorMsg}` });
-    }
+    console.log("🚀 Sending image to face-service...");
+    const response = await axios.post(FACE_SERVICE_URL, form, {
+      headers: {
+        ...form.getHeaders(),
+        "Content-Length": formLength,
+      },
+      timeout: 30000,
+    });
 
     const { verified, studentImage } = response.data;
 
     if (!verified) {
-      console.log("Face not recognized by service");
+      console.log("🙅 Face not recognized");
       return res.status(404).json({ message: "Face not recognized" });
     }
 
@@ -229,7 +195,6 @@ export const markAttendance = async (req, res) => {
     });
 
     if (!matchedStudent) {
-      console.log(`No student found for image: ${studentImage}`);
       return res.status(404).json({ message: "Student not found for the matched image" });
     }
 
@@ -243,7 +208,6 @@ export const markAttendance = async (req, res) => {
     });
 
     if (attendanceExists) {
-      console.log(`Attendance already marked for student: ${matchedStudent.name}`);
       return res.status(400).json({ message: "Attendance already marked for today" });
     }
 
@@ -265,14 +229,15 @@ export const markAttendance = async (req, res) => {
   } finally {
     if (tempFilePath && fs.existsSync(tempFilePath)) {
       try {
-        console.log(`🧹 Cleaning up file: ${tempFilePath}`);
         fs.unlinkSync(tempFilePath);
+        console.log(`🧹 Cleaned up: ${tempFilePath}`);
       } catch (cleanupErr) {
         console.error(`Error cleaning up file ${tempFilePath}:`, cleanupErr.message);
       }
     }
   }
 };
+
 
 export const getAttendanceByDate = async (req, res) => {
   try {
