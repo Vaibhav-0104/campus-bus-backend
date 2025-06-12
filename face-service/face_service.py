@@ -121,21 +121,18 @@ import tempfile
 
 app = Flask(__name__)
 UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ✅ Logging configuration
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ✅ Ensure upload directory exists
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# ✅ Health check route
+# Health check
 @app.route("/", methods=["GET"])
 def home():
-    
-    return "✅ Face Service is Live!"
+    return "✅ Face Service is Live!", 200
 
-# ✅ Resize function to optimize image comparison
+# Resize utility
 def resize_image(image_path, max_size=(224, 224)):
     try:
         with Image.open(image_path) as img:
@@ -145,42 +142,48 @@ def resize_image(image_path, max_size=(224, 224)):
             img.save(temp_path, "JPEG", quality=85)
             return temp_path
     except Exception as e:
-        logger.error(f"Error resizing image {image_path}: {str(e)}")
+        logger.error(f"❌ Failed to resize image {image_path}: {str(e)}")
         return None
 
-# ✅ POST endpoint for face verification
 @app.route("/verify-face", methods=["POST"])
 def verify_face():
     logger.info("📥 Received /verify-face request")
 
     uploaded_file = request.files.get("image")
     if not uploaded_file:
-        logger.error("❌ No image uploaded in form-data")
+        logger.error("❌ No file uploaded in form-data")
         return jsonify({"error": "No file uploaded"}), 400
 
-    # ✅ Save uploaded image
+    # Save uploaded image
     temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
     uploaded_path = os.path.join(UPLOAD_DIR, temp_filename)
     uploaded_file.save(uploaded_path)
     logger.info(f"🖼 Uploaded image saved: {uploaded_path}")
 
-    # ✅ Resize uploaded image
     resized_uploaded_path = resize_image(uploaded_path)
     if not resized_uploaded_path:
-        return jsonify({"error": "Invalid uploaded image"}), 400
+        return jsonify({"error": "Failed to resize uploaded image"}), 400
 
     try:
-        # ✅ Compare with all student images
         student_images = [
             os.path.join(UPLOAD_DIR, f)
             for f in os.listdir(UPLOAD_DIR)
-            if f != temp_filename and f.lower().endswith(('.jpg', '.jpeg', '.png'))
+            if f != temp_filename and f.lower().endswith((".jpg", ".jpeg", ".png"))
         ]
+
+        logger.info(f"🔍 Found {len(student_images)} student images for comparison")
 
         for student_path in student_images:
             resized_student = resize_image(student_path)
             if not resized_student:
+                logger.warning(f"⚠️ Skipping invalid student image: {student_path}")
                 continue
+
+            if not os.path.exists(resized_uploaded_path) or not os.path.exists(resized_student):
+                logger.warning("⚠️ One of the images missing before verification")
+                continue
+
+            logger.info(f"🧠 Comparing: {resized_uploaded_path} ↔ {resized_student}")
 
             try:
                 result = DeepFace.verify(
@@ -190,30 +193,33 @@ def verify_face():
                     detector_backend="opencv",
                     enforce_detection=False,
                 )
+                logger.info(f"📊 Result: {result}")
 
                 if result.get("verified"):
                     student_filename = os.path.basename(student_path)
+                    logger.info(f"✅ Match found: {student_filename}")
                     return jsonify({"verified": True, "studentImage": student_filename})
+
+            except Exception as e:
+                logger.error(f"❌ DeepFace crashed on compare: {e}")
 
             finally:
                 if os.path.exists(resized_student):
                     os.remove(resized_student)
 
-        logger.info("❌ No matching face found")
         return jsonify({"verified": False, "message": "Face not recognized"}), 404
 
     except Exception as e:
-        logger.exception("⚠️ Face verification failed")
+        logger.exception("🔥 Unhandled exception in /verify-face")
         return jsonify({"error": str(e)}), 500
 
     finally:
         if os.path.exists(uploaded_path):
             os.remove(uploaded_path)
-        if resized_uploaded_path and os.path.exists(resized_uploaded_path):
+        if os.path.exists(resized_uploaded_path):
             os.remove(resized_uploaded_path)
 
-# ✅ Run the app (Render requires port 8000)
+# Run app on port 8000 (Render requirement)
 if __name__ == "__main__":
     logger.info("🚀 Starting face-service Flask app")
     app.run(host="0.0.0.0", port=8000, threaded=True)
-
