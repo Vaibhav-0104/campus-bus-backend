@@ -6,38 +6,19 @@ import path from "path";
 import bcrypt from "bcrypt";
 import FormData from "form-data";
 
-// ✅ Create student and send image to face-service
 export const createStudent = async (req, res) => {
   try {
     const { envNumber, name, email, password, department, mobile, parentContact } = req.body;
-    if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact)
+
+    if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact) {
       return res.status(400).json({ message: "All fields are required" });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const imagePath = req.file ? `../face-service/uploads/${req.file.filename}` : "";
 
     const student = new Student({ envNumber, name, email, password: hashedPassword, department, mobile, parentContact, imagePath });
     await student.save();
-
-    // ✅ Send student image to face-service
-    if (req.file) {
-      const form = new FormData();
-      form.append("image", fs.createReadStream(req.file.path), {
-        filename: req.file.filename,
-        contentType: req.file.mimetype,
-      });
-
-      try {
-        await axios.post("https://face-service-j883.onrender.com/save-student-image", form, {
-          headers: form.getHeaders(),
-          timeout: 15000,
-        });
-        console.log("✅ Synced image to face-service");
-      } catch (err) {
-        console.error("❌ Failed to sync image to face-service:", err.message);
-      }
-    }
-
     res.status(201).json(student);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -141,148 +122,93 @@ export const loginStudent = async (req, res) => {
   }
 };
 
-// ✅ Mark attendance with retries
-// export const markAttendance = async (req, res) => {
-//   const tempFilePath = req.file?.path;
-//   try {
-//     if (!req.file) return res.status(400).json({ message: "Image is required" });
-//     if (!fs.existsSync(tempFilePath)) return res.status(400).json({ message: "File not found" });
-
-//     const form = new FormData();
-//     form.append("image", fs.createReadStream(tempFilePath), {
-//       filename: req.file.originalname || "image.jpg",
-//       contentType: req.file.mimetype || "image/jpeg",
-//     });
-
-//     // ✅ Check if face-service is awake
-//     try {
-//       await axios.get("https://face-service-j883.onrender.com/", { timeout: 5000 });
-//     } catch (err) {
-//       console.warn("⚠️ Face-service may still be waking up...");
-//     }
-
-//     await new Promise(resolve => setTimeout(resolve, 3000)); // Allow warm-up
-
-//     // ✅ Retry request to /verify-face
-//     let response;
-//     for (let i = 0; i < 3; i++) {
-//       try {
-//         response = await axios.post("https://face-service-j883.onrender.com/verify-face", form, {
-//           headers: form.getHeaders(),
-//           timeout: 60000,
-//         });
-//         break;
-//       } catch (err) {
-//         if (i === 2) throw err;
-//         console.warn(`Retry ${i + 1}/3 for face-service`);
-//         await new Promise(res => setTimeout(res, 3000));
-//       }
-//     }
-
-//     const { verified, studentImage } = response.data;
-//     if (!verified) return res.status(404).json({ message: "Face not recognized" });
-
-//     const matchedStudent = await Student.findOne({
-//       imagePath: `../face-service/uploads/${studentImage}`,
-//     });
-//     if (!matchedStudent) return res.status(404).json({ message: "Matched student not found" });
-
-//     const today = new Date();
-//     const alreadyMarked = await Attendance.findOne({
-//       studentId: matchedStudent._id,
-//       date: { $gte: new Date(today.setHours(0, 0, 0, 0)), $lt: new Date(today.setHours(23, 59, 59, 999)) },
-//     });
-
-//     if (alreadyMarked)
-//       return res.status(400).json({ message: "Attendance already marked today" });
-
-//     const attendance = await Attendance.create({
-//       studentId: matchedStudent._id,
-//       date: new Date(),
-//       status: "Present",
-//     });
-
-//     res.status(200).json({
-//       message: "Attendance marked successfully",
-//       student: matchedStudent.name,
-//       attendanceId: attendance._id,
-//     });
-//   } catch (error) {
-//     console.error("❌ markAttendance error:", error.message);
-//     res.status(500).json({ message: `Face recognition error: ${error.message}` });
-//   } finally {
-//     if (tempFilePath && fs.existsSync(tempFilePath)) {
-//       fs.unlinkSync(tempFilePath);
-//       console.log("🧹 Temp file cleaned up");
-//     }
-//   }
-// };
-
-
-
-
 export const markAttendance = async (req, res) => {
-  const tempFilePath = req.file?.path;
-
+  let tempFilePath = null;
   try {
-    // 🔍 1. Validate file
-    if (!req.file) return res.status(400).json({ message: "Image is required" });
-    if (!fs.existsSync(tempFilePath)) return res.status(400).json({ message: "File not found" });
+    if (!req.file) {
+      console.error("No file received in request");
+      return res.status(400).json({ message: "Image is required" });
+    }
 
-    // 📦 2. Prepare form
+    tempFilePath = req.file.path;
+    console.log(`Processing file: ${tempFilePath}, size: ${req.file.size} bytes`);
+
+    if (!fs.existsSync(tempFilePath)) {
+      console.error(`File not found at: ${tempFilePath}`);
+      return res.status(400).json({ message: "Uploaded file is missing or inaccessible" });
+    }
+
+    const fileContent = fs.readFileSync(tempFilePath);
+    if (fileContent.length === 0) {
+      console.error(`File is empty: ${tempFilePath}`);
+      return res.status(400).json({ message: "Uploaded file is empty" });
+    }
+
     const form = new FormData();
     form.append("image", fs.createReadStream(tempFilePath), {
       filename: req.file.originalname || "image.jpg",
       contentType: req.file.mimetype || "image/jpeg",
     });
 
-    // 🔄 3. Wake face-service
-    const faceServiceURL = "https://face-service-j883.onrender.com/verify-face";
+    const formLength = await new Promise((resolve, reject) => {
+      form.getLength((err, length) => {
+        if (err) reject(err);
+        resolve(length);
+      });
+    });
+    console.log(`FormData size: ${formLength} bytes`);
 
-    console.log("⏳ Pinging face-service...");
-    try {
-      await axios.get("https://face-service-j883.onrender.com/", { timeout: 5000 });
-    } catch (err) {
-      console.warn("⚠️ face-service may still be waking up...");
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 4000)); // 💤 warm-up delay
-
-    // 🔁 4. Retry axios POST with timeout
+    console.log("Sending request to face recognition service");
     let response;
-    for (let i = 0; i < 3; i++) {
-      try {
-        response = await axios.post(faceServiceURL, form, {
-          headers: {
-            ...form.getHeaders(),
-            "Content-Length": await new Promise((resolve, reject) => {
-              form.getLength((err, length) => (err ? reject(err) : resolve(length)));
-            }),
-          },
-          timeout: 60000, // ⏱️ long timeout
-        });
-        break;
-      } catch (err) {
-        console.warn(`Retry ${i + 1}/3 for face-service`);
-        if (i === 2) throw err;
-        await new Promise((r) => setTimeout(r, 3000));
+    const retryAxios = async (url, data, config, retries = 3, delay = 1000) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          return await axios.post(url, data, config);
+        } catch (error) {
+          if ((error.code === 'ECONNREFUSED' || error.response?.status >= 500) && i < retries - 1) {
+            console.warn(`Retry ${i + 1}/${retries} for ${url}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw error;
+        }
       }
+    };
+
+    try {
+      response = await retryAxios("http://localhost:5001/verify-face", form, {
+        headers: {
+          ...form.getHeaders(),
+          "Content-Length": formLength,
+        },
+      });
+      console.log("Face recognition response:", response.data);
+    } catch (error) {
+      if (error.code === 'ECONNREFUSED') {
+        console.error("Face recognition service is unavailable at http://localhost:5001");
+        return res.status(503).json({ message: "Face recognition service is unavailable. Please try again later." });
+      }
+      console.error("Error from face recognition service:", error.response?.data || error.message);
+      return res.status(error.response?.status || 500).json({
+        message: `Face recognition error: ${error.response?.data?.error || error.message}`,
+      });
     }
 
     const { verified, studentImage } = response.data;
-    if (!verified) return res.status(404).json({ message: "Face not recognized" });
 
-    // 🎓 5. Find student
-    const matchedStudent = await Student.findOne({
-      imagePath: `../face-service/uploads/${studentImage}`,
-    });
+    if (!verified) {
+      console.log("Face not recognized by service");
+      return res.status(404).json({ message: "Face not recognized" });
+    }
 
-    if (!matchedStudent)
-      return res.status(404).json({ message: "Matched student not found" });
+    const matchedStudent = await Student.findOne({ imagePath: `../face-service/uploads/${studentImage}` });
+    if (!matchedStudent) {
+      console.log(`No student found for image: ${studentImage}`);
+      return res.status(404).json({ message: "Student not found for the matched image" });
+    }
 
-    // 📅 6. Check if already marked
     const today = new Date();
-    const alreadyMarked = await Attendance.findOne({
+    const attendanceExists = await Attendance.findOne({
       studentId: matchedStudent._id,
       date: {
         $gte: new Date(today.setHours(0, 0, 0, 0)),
@@ -290,31 +216,38 @@ export const markAttendance = async (req, res) => {
       },
     });
 
-    if (alreadyMarked)
-      return res.status(400).json({ message: "Attendance already marked today" });
+    if (attendanceExists) {
+      console.log(`Attendance already marked for student: ${matchedStudent.name}`);
+      return res.status(400).json({ message: "Attendance already marked for today" });
+    }
 
-    // 📝 7. Save attendance
     const attendance = await Attendance.create({
       studentId: matchedStudent._id,
       date: new Date(),
       status: "Present",
     });
 
+    console.log(`Attendance marked for student: ${matchedStudent.name}`);
     res.status(200).json({
       message: "Attendance marked successfully",
       student: matchedStudent.name,
       attendanceId: attendance._id,
     });
   } catch (err) {
-    console.error("❌ markAttendance error:", err.message);
-    res.status(500).json({ message: `Face recognition error: ${err.message}` });
+    console.error("Error in markAttendance:", err.message, err.stack);
+    res.status(500).json({ message: `Internal server error: ${err.message}` });
   } finally {
     if (tempFilePath && fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
-      console.log("🧹 Temp file cleaned up");
+      try {
+        console.log(`Cleaning up file: ${tempFilePath}`);
+        fs.unlinkSync(tempFilePath);
+      } catch (cleanupErr) {
+        console.error(`Error cleaning up file ${tempFilePath}:`, cleanupErr.message);
+      }
     }
   }
 };
+
 export const getAttendanceByDate = async (req, res) => {
   try {
     const { date, studentIds } = req.body;
@@ -351,3 +284,4 @@ export const getAttendanceByDate = async (req, res) => {
     res.status(500).json({ message: 'Error fetching attendance', error: error.message });
   }
 };
+
