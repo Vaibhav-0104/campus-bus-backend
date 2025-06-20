@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import { createStudent, getAllStudents, updateStudent, deleteStudent, loginStudent, getAttendanceByDate } from "../controllers/studentController.js";
+import { createStudent, getAllStudents, updateStudent, deleteStudent, loginStudent, getAttendancePercentageByDateRange, getAttendanceByDate, getRouteByEnv } from "../controllers/studentController.js";
 import { markAttendance } from "../controllers/studentController.js";
 const router = express.Router();
 
@@ -21,6 +21,8 @@ router.put("/:id", upload.single("image"), updateStudent);
 router.delete("/:id", deleteStudent);
 router.post("/login", loginStudent);
 router.post("/attendance", upload.single("image"), markAttendance);
-router.post("/attendance/by-date", getAttendanceByDate);
+router.post("/attendance/by-date", getAttendancePercentageByDateRange);
+router.post("/attendance/date", getAttendanceByDate);
+router.get('/route-by-env/:envNumber', getRouteByEnv);
 
 export default router;

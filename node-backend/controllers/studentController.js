@@ -1,4 +1,6 @@
 import Student from "../models/Student.js";
+import BusAllocation from '../models/BusAllocation.js';
+import Bus from '../models/Bus.js';
 import Attendance from "../models/Attendance.js";
 import axios from "axios";
 import fs from "fs";
@@ -248,6 +250,94 @@ export const markAttendance = async (req, res) => {
   }
 };
 
+// 📌 6
+// 📌 Student: Get Attendance Percentage by Date Range (UPDATED)
+// This function now also returns detailed daily attendance records.
+export const getAttendancePercentageByDateRange = async (req, res) => {
+  try {
+    const { envNumber, startDate, endDate } = req.body;
+
+    // Validate incoming parameters
+    if (!envNumber || !startDate || !endDate) {
+      console.error("Validation Error: envNumber, startDate, and endDate are required for getAttendancePercentageByDateRange.");
+      return res.status(400).json({ message: "envNumber, startDate, and endDate are required." });
+    }
+
+    // Find the student by envNumber to get their studentId
+    const student = await Student.findOne({ envNumber });
+    if (!student) {
+      console.error(`Data Not Found: Student with envNumber ${envNumber} not found for attendance calculation.`);
+      return res.status(404).json({ message: "Student not found." });
+    }
+
+    const start = new Date(startDate);
+    start.setUTCHours(0, 0, 0, 0); // Set to start of the day in UTC
+    const end = new Date(endDate);
+    end.setUTCHours(23, 59, 59, 999); // Set to end of the day in UTC
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        console.error("Validation Error: Invalid date format provided for startDate or endDate.");
+        return res.status(400).json({ message: "Invalid date format. Please use YYYY-MM-DD." });
+    }
+
+    // Fetch all attendance records for the student within the date range
+    const attendanceRecords = await Attendance.find({
+      studentId: student._id,
+      date: { $gte: start, $lte: end },
+    }).select('date status -_id'); // Select only date and status, exclude _id
+
+    if (attendanceRecords.length === 0) {
+      console.log(`No attendance data found for envNumber ${envNumber} between ${startDate} and ${endDate}.`);
+      return res.status(200).json({ 
+        percentage: 0, 
+        totalDays: 0, 
+        presentDays: 0, 
+        absentDays: 0, 
+        dailyRecords: [], // Return empty array for daily records
+        message: "No attendance data available for this period." 
+      });
+    }
+
+    let presentDays = 0;
+    const uniqueDates = new Set(); // To count unique days for attendance
+
+    // Prepare daily records in a map for easy lookup
+    const dailyRecordsMap = {}; // Date string (YYYY-MM-DD) -> status
+    attendanceRecords.forEach(record => {
+      const recordDate = new Date(record.date).toISOString().split('T')[0]; // Get date part only
+      dailyRecordsMap[recordDate] = record.status; // Store status for the date
+    });
+
+    // Calculate present days based on unique dates found
+    Object.keys(dailyRecordsMap).forEach(dateStr => {
+      if (dailyRecordsMap[dateStr] === "Present") {
+        presentDays++;
+      }
+      uniqueDates.add(dateStr); // Add to unique dates set
+    });
+
+    const totalDaysRecorded = uniqueDates.size; // Total unique days for which records exist
+    const attendancePercentage = totalDaysRecorded > 0 ? (presentDays / totalDaysRecorded) * 100 : 0;
+
+    res.status(200).json({
+      percentage: attendancePercentage.toFixed(2), // Format to 2 decimal places
+      totalDays: totalDaysRecorded, // Total days with recorded attendance
+      presentDays: presentDays,
+      absentDays: totalDaysRecorded - presentDays,
+      dailyRecords: attendanceRecords.map(record => ({
+          date: record.date.toISOString().split('T')[0], // Return date as YYYY-MM-DD string
+          status: record.status
+      })) // Return the detailed daily records
+    });
+    console.log(`✅ Attendance calculated for envNumber ${envNumber}: ${attendancePercentage.toFixed(2)}%`);
+
+  } catch (error) {
+    console.error("Error in getAttendancePercentageByDateRange:", error);
+    res.status(500).json({ message: 'Error fetching attendance percentage', error: error.message });
+  }
+};
+
+
 export const getAttendanceByDate = async (req, res) => {
   try {
     const { date, studentIds } = req.body;
@@ -285,3 +375,25 @@ export const getAttendanceByDate = async (req, res) => {
   }
 };
 
+
+// 📌 7. set the student route 
+export const getRouteByEnv = async (req, res) => {
+  try {
+    const { envNumber } = req.params;
+    console.log(`Looking for student with envNumber: ${envNumber}`); // Debug log
+    const student = await Student.findOne({ envNumber });
+    if (!student) {
+      return res.status(404).json({ error: `Student not found for envNumber: ${envNumber}` });
+    }
+
+    const allocation = await BusAllocation.findOne({ studentId: student._id }).populate('busId', 'to');
+    if (!allocation || !allocation.busId) {
+      return res.status(404).json({ error: `No route assigned to student with envNumber: ${envNumber}` });
+    }
+
+    res.status(200).json({ route: allocation.busId.to });
+  } catch (error) {
+    console.error('Error in getRouteByEnv:', error.message);
+    res.status(500).json({ error: 'Error fetching route' });
+  }
+};

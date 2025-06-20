@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import BusAllocation from '../models/BusAllocation.js';
 import Student from '../models/Student.js';
 import Bus from '../models/Bus.js';
@@ -74,22 +75,33 @@ export const getDriverAllocations = async (req, res) => {
     try {
         const { driverId } = req.params;
         console.log(`Fetching allocations for driverId: ${driverId}`);
+
+        // Validate driverId
+        if (!mongoose.Types.ObjectId.isValid(driverId)) {
+            console.log(`Invalid driverId: ${driverId}`);
+            return res.status(400).json({ message: 'Invalid driver ID' });
+        }
+
         const driver = await Driver.findById(driverId);
         if (!driver) {
             console.log(`No driver found for driverId: ${driverId}`);
             return res.status(404).json({ message: 'Driver not found' });
         }
         console.log(`Found driver: ${driver.name}`);
-        const bus = await Bus.findOne({ driver: driver.name, status: 'Active' });
+
+        // Use driverId to find the bus
+        const bus = await Bus.findOne({ driverId: driverId, status: 'Active' });
         if (!bus) {
-            console.log(`No active bus found for driver: ${driver.name}`);
+            console.log(`No active bus found for driverId: ${driverId}`);
             return res.status(404).json({ message: 'No active bus assigned to this driver' });
         }
         console.log(`Found bus: ${bus.busNumber}`);
+
         const allocations = await BusAllocation.find({ busId: bus._id })
-            .populate('studentId', 'envNumber name class phone email')
+            .populate('studentId', 'envNumber name email') // Match frontend expectations
             .populate('busId', 'busNumber to');
         console.log(`Found ${allocations.length} allocations for busId: ${bus._id}`);
+
         res.status(200).json(allocations);
     } catch (error) {
         console.error('Error in getDriverAllocations:', error.message, error.stack);
