@@ -118,18 +118,24 @@ import Driver from '../models/Driver.js';
 
 // Allocate bus to student
 export const allocateBus = async (req, res) => {
-  const { studentId, busId, to } = req.body;
+  const { studentId, busId, to, seatNumber } = req.body;
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    // Validate input
-    if (!studentId || !busId || !to) {
-      console.log(`Missing required fields: studentId=${studentId}, busId=${busId}, to=${to}`);
-      return res.status(400).json({ message: 'Student ID, Bus ID, and To destination are required' });
+    if (!studentId || !busId || !to || !seatNumber) {
+      console.log(`Missing required fields: studentId=${studentId}, busId=${busId}, to=${to}, seatNumber=${seatNumber}`);
+      return res.status(400).json({ message: 'Student ID, Bus ID, To destination, and Seat Number are required' });
     }
 
-    // Validate student and bus
-    const student = await Student.findById(studentId);
-    const bus = await Bus.findById(busId);
+    if (!mongoose.Types.ObjectId.isValid(studentId) || !mongoose.Types.ObjectId.isValid(busId)) {
+      console.log(`Invalid ID: studentId=${studentId}, busId=${busId}`);
+      return res.status(400).json({ message: 'Invalid Student ID or Bus ID' });
+    }
+
+    const student = await Student.findById(studentId).session(session);
+    const bus = await Bus.findById(busId).session(session);
 
     if (!student) {
       console.log(`Student not found for ID: ${studentId}`);
@@ -140,54 +146,88 @@ export const allocateBus = async (req, res) => {
       return res.status(404).json({ message: 'Bus not found' });
     }
 
-    // Check if bus.to matches the provided to
     if (bus.to !== to) {
       console.log(`Bus destination mismatch: bus.to=${bus.to}, provided to=${to}`);
       return res.status(400).json({ message: `Bus destination (${bus.to}) does not match provided destination (${to})` });
     }
 
-    // Check for existing allocation
-    let allocation = await BusAllocation.findOne({ studentId });
+    if (parseInt(seatNumber) < 1 || parseInt(seatNumber) > bus.capacity) {
+      console.log(`Invalid seat number: ${seatNumber}, capacity: ${bus.capacity}`);
+      return res.status(400).json({ message: `Seat number must be between 1 and ${bus.capacity}` });
+    }
+
+    bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
+
+    if (bus.allocatedSeats.includes(seatNumber)) {
+      console.log(`Seat ${seatNumber} already allocated on bus ${busId}`);
+      await session.abortTransaction();
+      return res.status(400).json({ message: `Seat ${seatNumber} is already allocated` });
+    }
+
+    let allocation = await BusAllocation.findOne({ studentId }).session(session);
 
     if (allocation) {
-      // Update existing allocation
+      const oldBus = await Bus.findById(allocation.busId).session(session);
+      if (oldBus) {
+        oldBus.allocatedSeats = Array.isArray(oldBus.allocatedSeats) ? oldBus.allocatedSeats : [];
+        oldBus.allocatedSeats = oldBus.allocatedSeats.filter(seat => seat !== allocation.seatNumber);
+        await oldBus.save({ session });
+      }
+
       allocation.busId = busId;
       allocation.to = to;
-      await allocation.save();
-      console.log(`Updated bus allocation for student: ${studentId}, bus: ${busId}, to: ${to}`);
-      return res.status(200).json({ message: 'Bus allocation updated successfully', allocation });
+      allocation.seatNumber = seatNumber;
+      await allocation.save({ session });
+      console.log(`Updated bus allocation for student: ${studentId}, bus: ${busId}, to: ${to}, seat: ${seatNumber}`);
     } else {
-      // Create new allocation
-      allocation = new BusAllocation({ studentId, busId, to });
-      await allocation.save();
-      console.log(`Created new bus allocation for student: ${studentId}, bus: ${busId}, to: ${to}`);
-      return res.status(201).json({ message: 'Bus allocation created successfully', allocation });
+      allocation = new BusAllocation({ studentId, busId, to, seatNumber });
+      await allocation.save({ session });
+      console.log(`Created new bus allocation for student: ${studentId}, bus: ${busId}, to: ${to}, seat: ${seatNumber}`);
     }
+
+    bus.allocatedSeats.push(seatNumber);
+    await bus.save({ session });
+
+    await session.commitTransaction();
+
+    const populatedAllocation = await BusAllocation.findById(allocation._id)
+      .populate('studentId', 'envNumber name')
+      .populate('busId', 'busNumber to');
+    res.status(allocation.isNew ? 201 : 200).json({ message: `Bus allocation ${allocation.isNew ? 'created' : 'updated'} successfully`, allocation: populatedAllocation });
   } catch (error) {
+    await session.abortTransaction();
     console.error('Error in allocateBus:', error.message, error.stack);
     res.status(500).json({ message: 'Error allocating bus', error: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
 // Update bus allocation
 export const updateAllocation = async (req, res) => {
   const { id } = req.params;
-  const { studentId, busId, to } = req.body;
+  const { studentId, busId, to, seatNumber } = req.body;
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    // Validate input
     if (!mongoose.Types.ObjectId.isValid(id)) {
       console.log(`Invalid allocation ID: ${id}`);
       return res.status(400).json({ message: 'Invalid allocation ID' });
     }
-    if (!studentId || !busId || !to) {
-      console.log(`Missing required fields: studentId=${studentId}, busId=${busId}, to=${to}`);
-      return res.status(400).json({ message: 'Student ID, Bus ID, and To destination are required' });
+    if (!studentId || !busId || !to || !seatNumber) {
+      console.log(`Missing required fields: studentId=${studentId}, busId=${busId}, to=${to}, seatNumber=${seatNumber}`);
+      return res.status(400).json({ message: 'Student ID, Bus ID, To destination, and Seat Number are required' });
     }
 
-    // Validate student and bus
-    const student = await Student.findById(studentId);
-    const bus = await Bus.findById(busId);
+    if (!mongoose.Types.ObjectId.isValid(studentId) || !mongoose.Types.ObjectId.isValid(busId)) {
+      console.log(`Invalid ID: studentId=${studentId}, busId=${busId}`);
+      return res.status(400).json({ message: 'Invalid Student ID or Bus ID' });
+    }
+
+    const student = await Student.findById(studentId).session(session);
+    const bus = await Bus.findById(busId).session(session);
 
     if (!student) {
       console.log(`Student not found for ID: ${studentId}`);
@@ -198,29 +238,66 @@ export const updateAllocation = async (req, res) => {
       return res.status(404).json({ message: 'Bus not found' });
     }
 
-    // Check if bus.to matches the provided to
     if (bus.to !== to) {
       console.log(`Bus destination mismatch: bus.to=${bus.to}, provided to=${to}`);
       return res.status(400).json({ message: `Bus destination (${bus.to}) does not match provided destination (${to})` });
     }
 
-    // Find and update allocation
-    const allocation = await BusAllocation.findById(id);
+    if (parseInt(seatNumber) < 1 || parseInt(seatNumber) > bus.capacity) {
+      console.log(`Invalid seat number: ${seatNumber}, capacity: ${bus.capacity}`);
+      return res.status(400).json({ message: `Seat number must be between 1 and ${bus.capacity}` });
+    }
+
+    const allocation = await BusAllocation.findById(id).session(session);
     if (!allocation) {
       console.log(`Allocation not found for ID: ${id}`);
       return res.status(404).json({ message: 'Allocation not found' });
     }
 
+    const oldBusId = allocation.busId;
+    const oldSeatNumber = allocation.seatNumber;
+
+    if (oldBusId.toString() !== busId.toString()) {
+      const oldBus = await Bus.findById(oldBusId).session(session);
+      if (oldBus) {
+        oldBus.allocatedSeats = Array.isArray(oldBus.allocatedSeats) ? oldBus.allocatedSeats : [];
+        oldBus.allocatedSeats = oldBus.allocatedSeats.filter(seat => seat !== oldSeatNumber);
+        await oldBus.save({ session });
+      }
+    } else if (seatNumber !== oldSeatNumber) {
+      bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
+      bus.allocatedSeats = bus.allocatedSeats.filter(seat => seat !== oldSeatNumber);
+    }
+
+    bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
+    if (!bus.allocatedSeats.includes(seatNumber)) {
+      bus.allocatedSeats.push(seatNumber);
+      await bus.save({ session });
+    } else if (seatNumber !== oldSeatNumber) {
+      console.log(`Seat ${seatNumber} already allocated on bus ${busId}`);
+      await session.abortTransaction();
+      return res.status(400).json({ message: `Seat ${seatNumber} is already allocated` });
+    }
+
     allocation.studentId = studentId;
     allocation.busId = busId;
     allocation.to = to;
-    await allocation.save();
+    allocation.seatNumber = seatNumber;
+    await allocation.save({ session });
 
-    console.log(`Updated allocation ID: ${id}, student: ${studentId}, bus: ${busId}, to: ${to}`);
-    res.status(200).json({ message: 'Bus allocation updated successfully', allocation });
+    await session.commitTransaction();
+
+    const populatedAllocation = await BusAllocation.findById(id)
+      .populate('studentId', 'envNumber name')
+      .populate('busId', 'busNumber to');
+    console.log(`Updated allocation ID: ${id}, student: ${studentId}, bus: ${busId}, to: ${to}, seat: ${seatNumber}`);
+    res.status(200).json({ message: 'Bus allocation updated successfully', allocation: populatedAllocation });
   } catch (error) {
+    await session.abortTransaction();
     console.error('Error in updateAllocation:', error.message, error.stack);
     res.status(500).json({ message: 'Error updating allocation', error: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -228,37 +305,55 @@ export const updateAllocation = async (req, res) => {
 export const deleteAllocation = async (req, res) => {
   const { id } = req.params;
 
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    // Validate ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       console.log(`Invalid allocation ID: ${id}`);
       return res.status(400).json({ message: 'Invalid allocation ID' });
     }
 
-    // Find and delete allocation
-    const allocation = await BusAllocation.findByIdAndDelete(id);
+    const allocation = await BusAllocation.findById(id).session(session);
     if (!allocation) {
       console.log(`Allocation not found for ID: ${id}`);
       return res.status(404).json({ message: 'Allocation not found' });
     }
 
+    const bus = await Bus.findById(allocation.busId).session(session);
+    if (bus) {
+      bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
+      bus.allocatedSeats = bus.allocatedSeats.filter(seat => seat !== allocation.seatNumber);
+      await bus.save({ session });
+    } else {
+      console.warn(`Bus not found for busId: ${allocation.busId} during allocation deletion`);
+    }
+
+    await BusAllocation.findByIdAndDelete(id, { session });
     console.log(`Deleted allocation ID: ${id}`);
+    await session.commitTransaction();
     res.status(200).json({ message: 'Bus allocation deleted successfully' });
   } catch (error) {
+    await session.abortTransaction();
     console.error('Error in deleteAllocation:', error.message, error.stack);
     res.status(500).json({ message: 'Error deleting allocation', error: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
 // Fetch all allocations with student and bus details
 export const getAllAllocations = async (req, res) => {
   try {
-    const { busNumber } = req.query;
-    console.log(`Fetching allocations for busNumber: ${busNumber || 'all'}`);
+    const { busNumber, busId } = req.query;
+    console.log(`Fetching allocations for busNumber: ${busNumber || 'all'}, busId: ${busId || 'all'}`);
 
     let query = {};
 
-    if (busNumber) {
+    if (busId && mongoose.Types.ObjectId.isValid(busId)) {
+      query.busId = busId;
+      console.log(`Filtering by busId: ${busId}`);
+    } else if (busNumber) {
       const bus = await Bus.findOne({ busNumber });
       if (!bus) {
         console.log(`No bus found for busNumber: ${busNumber}`);
@@ -286,7 +381,6 @@ export const getDriverAllocations = async (req, res) => {
     const { driverId } = req.params;
     console.log(`Fetching allocations for driverId: ${driverId}`);
 
-    // Validate driverId
     if (!mongoose.Types.ObjectId.isValid(driverId)) {
       console.log(`Invalid driverId: ${driverId}`);
       return res.status(400).json({ message: 'Invalid driver ID' });
@@ -299,7 +393,6 @@ export const getDriverAllocations = async (req, res) => {
     }
     console.log(`Found driver: ${driver.name}`);
 
-    // Use driverId to find the bus
     const bus = await Bus.findOne({ driverId: driverId, status: 'Active' });
     if (!bus) {
       console.log(`No active bus found for driverId: ${driverId}`);
