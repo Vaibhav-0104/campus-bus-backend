@@ -8,24 +8,79 @@ import path from "path";
 import bcrypt from "bcrypt";
 import FormData from "form-data";
 
+
+// ✅ Add Parent Login
+export const loginParent = async (req, res) => {
+  try {
+    const { parentContact, parentEmail } = req.body;
+
+    if (!parentContact || !parentEmail) {
+      return res.status(400).json({ message: "Parent contact and email are required" });
+    }
+
+    const student = await Student.findOne({ parentContact });
+
+    if (!student) {
+      return res.status(404).json({ message: "Parent contact not found" });
+    }
+
+    if (student.parentEmail !== parentEmail) {
+      return res.status(401).json({ message: "Invalid parent email or contact" });
+    }
+
+    res.status(200).json({
+      message: "Parent login successful",
+      student: {
+        envNumber: student.envNumber,
+        name: student.name,
+        department: student.department,
+        parentContact: student.parentContact,
+        parentEmail: student.parentEmail,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Error logging in", error: error.message });
+  }
+};
+
+// 🔄 Updated createStudent to include parentEmail
 export const createStudent = async (req, res) => {
   try {
-    const { envNumber, name, email, password, department, mobile, parentContact } = req.body;
+    const { envNumber, name, email, password, department, mobile, parentContact, parentEmail } = req.body;
 
-    if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact) {
+    if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact || !parentEmail) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const imagePath = req.file ? `../face-service/uploads/${req.file.filename}` : "";
 
-    const student = new Student({ envNumber, name, email, password: hashedPassword, department, mobile, parentContact, imagePath });
+    const student = new Student({ envNumber, name, email, password: hashedPassword, department, mobile, parentContact, parentEmail, imagePath });
     await student.save();
     res.status(201).json(student);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 };
+
+// export const createStudent = async (req, res) => {
+//   try {
+//     const { envNumber, name, email, password, department, mobile, parentContact } = req.body;
+
+//     if (!envNumber || !name || !email || !password || !department || !mobile || !parentContact) {
+//       return res.status(400).json({ message: "All fields are required" });
+//     }
+
+//     const hashedPassword = await bcrypt.hash(password, 10);
+//     const imagePath = req.file ? `../face-service/uploads/${req.file.filename}` : "";
+
+//     const student = new Student({ envNumber, name, email, password: hashedPassword, department, mobile, parentContact, imagePath });
+//     await student.save();
+//     res.status(201).json(student);
+//   } catch (error) {
+//     res.status(400).json({ message: error.message });
+//   }
+// };
 
 export const getAllStudents = async (req, res) => {
   try {
