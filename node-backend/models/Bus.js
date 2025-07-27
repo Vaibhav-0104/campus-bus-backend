@@ -8,6 +8,7 @@ const busSchema = new mongoose.Schema({
   driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', required: true },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   driver: { type: String }, // Temporarily keep for migration
+  allocatedSeats: { type: [String], default: [] }, // Added to store allocated seat numbers
 });
 
 export default mongoose.model('Bus', busSchema);

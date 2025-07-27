@@ -156,17 +156,26 @@ export const allocateBus = async (req, res) => {
       return res.status(400).json({ message: `Seat number must be between 1 and ${bus.capacity}` });
     }
 
-    bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
-
-    if (bus.allocatedSeats.includes(seatNumber)) {
-      console.log(`Seat ${seatNumber} already allocated on bus ${busId}`);
+    // Check for existing allocation of the same seat on the same bus
+    const existingSeatAllocation = await BusAllocation.findOne({ busId, seatNumber }).session(session);
+    if (existingSeatAllocation) {
+      console.log(`Seat ${seatNumber} already allocated on bus ${busId} to student ${existingSeatAllocation.studentId}`);
       await session.abortTransaction();
-      return res.status(400).json({ message: `Seat ${seatNumber} is already allocated` });
+      return res.status(400).json({ message: `Seat ${seatNumber} is already allocated to another student` });
     }
 
+    // Check if the student already has an allocation on any bus
     let allocation = await BusAllocation.findOne({ studentId }).session(session);
 
     if (allocation) {
+      // If updating, ensure the seat is not taken by another student
+      if (allocation.busId.toString() === busId.toString() && allocation.seatNumber === seatNumber) {
+        // Same allocation, no update needed
+        await session.abortTransaction();
+        return res.status(200).json({ message: 'No changes made to allocation', allocation });
+      }
+
+      // Clear old allocation
       const oldBus = await Bus.findById(allocation.busId).session(session);
       if (oldBus) {
         oldBus.allocatedSeats = Array.isArray(oldBus.allocatedSeats) ? oldBus.allocatedSeats : [];
@@ -185,6 +194,8 @@ export const allocateBus = async (req, res) => {
       console.log(`Created new bus allocation for student: ${studentId}, bus: ${busId}, to: ${to}, seat: ${seatNumber}`);
     }
 
+    // Update bus's allocated seats
+    bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
     bus.allocatedSeats.push(seatNumber);
     await bus.save({ session });
 
@@ -193,7 +204,10 @@ export const allocateBus = async (req, res) => {
     const populatedAllocation = await BusAllocation.findById(allocation._id)
       .populate('studentId', 'envNumber name')
       .populate('busId', 'busNumber to');
-    res.status(allocation.isNew ? 201 : 200).json({ message: `Bus allocation ${allocation.isNew ? 'created' : 'updated'} successfully`, allocation: populatedAllocation });
+    res.status(allocation.isNew ? 201 : 200).json({ 
+      message: `Bus allocation ${allocation.isNew ? 'created' : 'updated'} successfully`, 
+      allocation: populatedAllocation 
+    });
   } catch (error) {
     await session.abortTransaction();
     console.error('Error in allocateBus:', error.message, error.stack);
@@ -254,6 +268,18 @@ export const updateAllocation = async (req, res) => {
       return res.status(404).json({ message: 'Allocation not found' });
     }
 
+    // Check if the seat is allocated to another student on the same bus
+    const existingSeatAllocation = await BusAllocation.findOne({ 
+      busId, 
+      seatNumber, 
+      _id: { $ne: id } // Exclude the current allocation
+    }).session(session);
+    if (existingSeatAllocation) {
+      console.log(`Seat ${seatNumber} already allocated on bus ${busId} to student ${existingSeatAllocation.studentId}`);
+      await session.abortTransaction();
+      return res.status(400).json({ message: `Seat ${seatNumber} is already allocated to another student` });
+    }
+
     const oldBusId = allocation.busId;
     const oldSeatNumber = allocation.seatNumber;
 
@@ -270,14 +296,8 @@ export const updateAllocation = async (req, res) => {
     }
 
     bus.allocatedSeats = Array.isArray(bus.allocatedSeats) ? bus.allocatedSeats : [];
-    if (!bus.allocatedSeats.includes(seatNumber)) {
-      bus.allocatedSeats.push(seatNumber);
-      await bus.save({ session });
-    } else if (seatNumber !== oldSeatNumber) {
-      console.log(`Seat ${seatNumber} already allocated on bus ${busId}`);
-      await session.abortTransaction();
-      return res.status(400).json({ message: `Seat ${seatNumber} is already allocated` });
-    }
+    bus.allocatedSeats.push(seatNumber);
+    await bus.save({ session });
 
     allocation.studentId = studentId;
     allocation.busId = busId;
