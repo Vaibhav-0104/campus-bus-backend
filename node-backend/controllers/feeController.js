@@ -102,7 +102,7 @@ export const createPayment = async (req, res) => {
       orderId: order.id,
       currency: order.currency,
       amount: order.amount,
-      key: process.env.RAZORPAY_KEY, // Ensure this is correctly set in .env
+      key: process.env.RAZORPAY_KEY,
     });
 
     console.log("✅ Razorpay Order Created:", order.id, "for envNumber:", envNumber);
@@ -117,7 +117,6 @@ export const verifyPayment = async (req, res) => {
   try {
     const { envNumber, paymentId, orderId, signature } = req.body;
 
-    // --- Strict Input Validation ---
     if (!envNumber || !paymentId || !orderId || !signature) {
       console.error("Verification Error: Missing required fields in verifyPayment request body.", { envNumber, paymentId, orderId, signature });
       return res.status(400).json({ error: "Missing required payment verification details." });
@@ -130,14 +129,11 @@ export const verifyPayment = async (req, res) => {
       return res.status(404).json({ error: "Student fee record not found for verification." });
     }
 
-    // --- Check if Razorpay Secret is loaded ---
     if (!process.env.RAZORPAY_SECRET) {
       console.error("Configuration Error: RAZORPAY_SECRET is not set in environment variables. Cannot verify payment.");
-      // This is a critical server-side error, avoid exposing exact details to client
       return res.status(500).json({ error: "Server configuration error during payment verification." });
     }
 
-    // --- Verify Payment Signature using Crypto ---
     const body = orderId + "|" + paymentId;
     let expectedSignature;
     try {
@@ -155,13 +151,11 @@ export const verifyPayment = async (req, res) => {
       return res.status(400).json({ error: "Payment Verification Failed: Signature mismatch!" });
     }
 
-    // --- Check if already paid to prevent double updates ---
     if (fee.isPaid) {
         console.warn(`Verification Warning: Fee for envNumber ${envNumber} (orderId: ${orderId}) is already marked as paid.`);
         return res.status(200).json({ message: "Payment already verified and status updated.", fee });
     }
 
-    // --- Update Fee Status in Database ---
     fee.isPaid = true;
     fee.paymentDate = new Date();
     fee.transactionId = paymentId;
@@ -186,5 +180,46 @@ export const getAllFees = async (req, res) => {
   }
 };
 
+// 📌 6. Admin: Get Enrollment Numbers by Department
+export const getEnvNumbersByDepartment = async (req, res) => {
+  try {
+    const { department } = req.params;
 
+    if (!department) {
+      console.error("Validation Error: Department is required in getEnvNumbersByDepartment request.");
+      return res.status(400).json({ error: "Department is required!" });
+    }
 
+    const students = await Student.find({ department }, { envNumber: 1 });
+    
+    if (!students || students.length === 0) {
+      console.error(`Data Not Found: No students found for department ${department}.`);
+      return res.status(404).json({ error: "No students found for this department." });
+    }
+
+    const envNumbers = students.map(student => student.envNumber);
+    res.status(200).json({ envNumbers });
+    console.log(`✅ Fetched ${envNumbers.length} enrollment numbers for department: ${department}`);
+  } catch (error) {
+    console.error("Error in getEnvNumbersByDepartment:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// 📌 7. Admin: Get All Departments
+export const getAllDepartments = async (req, res) => {
+  try {
+    const departments = await Student.distinct("department");
+    
+    if (!departments || departments.length === 0) {
+      console.error("Data Not Found: No departments found in Student collection.");
+      return res.status(404).json({ error: "No departments found." });
+    }
+
+    res.status(200).json({ departments });
+    console.log(`✅ Fetched ${departments.length} unique departments`);
+  } catch (error) {
+    console.error("Error in getAllDepartments:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
