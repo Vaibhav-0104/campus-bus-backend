@@ -45,6 +45,11 @@ export const createBus = async (req, res) => {
     if (existingBus) {
       return res.status(400).json({ message: 'Bus number already exists' });
     }
+    // Check if driver is already assigned
+    const assignedBus = await Bus.findOne({ driverId });
+    if (assignedBus) {
+      return res.status(400).json({ message: 'Driver is already assigned to a bus' });
+    }
 
     const newBus = new Bus({
       busNumber,
@@ -82,6 +87,15 @@ export const updateBus = async (req, res) => {
     const existingBus = await Bus.findOne({ busNumber, _id: { $ne: req.params.id } });
     if (existingBus) {
       return res.status(400).json({ message: 'Bus number already exists' });
+    }
+    // Check if changing driver and new driver is assigned to another bus
+    const currentBus = await Bus.findById(req.params.id);
+    if (!currentBus) return res.status(404).json({ message: 'Bus not found' });
+    if (driverId !== currentBus.driverId.toString()) {
+      const assignedBus = await Bus.findOne({ driverId });
+      if (assignedBus) {
+        return res.status(400).json({ message: 'Driver is already assigned to another bus' });
+      }
     }
 
     const updatedBus = await Bus.findByIdAndUpdate(
