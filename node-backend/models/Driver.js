@@ -6,7 +6,8 @@ const driverSchema = new mongoose.Schema({
     license: { type: String, required: true },
     email: { type: String, required: true },
     password: { type: String, required: true },
-    status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }
+    status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+    licenseDocument: { type: String } // Path to uploaded PDF
 });
 
 // ✅ This is required for ES Modules

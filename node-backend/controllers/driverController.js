@@ -16,7 +16,22 @@ export const getDrivers = async (req, res) => {
 // Add new driver
 export const addDriver = async (req, res) => {
     try {
-        const newDriver = new Driver(req.body);
+        const { name, contact, license, email, password, status } = req.body;
+
+        // Require PDF for new driver
+        if (!req.file) {
+            return res.status(400).json({ message: 'License PDF is required' });
+        }
+
+        const newDriver = new Driver({
+            name,
+            contact,
+            license,
+            email,
+            password,
+            status,
+            licenseDocument: `/uploads/${req.file.filename}` // Save PDF path
+        });
         await newDriver.save();
         res.status(201).json({ message: 'Driver added successfully!' });
     } catch (error) {
@@ -28,7 +43,14 @@ export const addDriver = async (req, res) => {
 export const updateDriver = async (req, res) => {
     try {
         const { id } = req.params;
-        await Driver.findByIdAndUpdate(id, req.body, { new: true });
+        const updatedData = req.body;
+
+        // If new PDF uploaded, update the path
+        if (req.file) {
+            updatedData.licenseDocument = `/uploads/${req.file.filename}`;
+        }
+
+        await Driver.findByIdAndUpdate(id, updatedData, { new: true });
         res.json({ message: 'Driver updated successfully!' });
     } catch (error) {
         res.status(400).json({ message: error.message });
