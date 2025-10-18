@@ -9,6 +9,8 @@ router.post("/pay", createPayment);
 router.post("/verify", verifyPayment);
 router.get("/all", getAllFees);
 router.get("/env-numbers/:department", getEnvNumbersByDepartment);
-router.get("/departments", getAllDepartments); // New route
+router.get("/departments", getAllDepartments);
 
 export default router;
+
+

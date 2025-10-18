@@ -96,7 +96,7 @@ app.use("/api/admin/auth", adminAuthRoutes);
 app.use('/api/buses', busRoutes);
 app.use('/api', driverRoutes);
 app.use('/api/students', studentRoutes);
-app.use('/uploads', express.static(path.join(path.resolve(), 'uploads')));
+app.use('/api/uploads', express.static(path.join(path.resolve(), 'uploads')));
 app.use('/api/allocations', allocationRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/fees", feeRoutes);

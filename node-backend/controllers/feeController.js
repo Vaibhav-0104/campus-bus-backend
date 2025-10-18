@@ -9,11 +9,16 @@ dotenv.config();
 // 📌 1. Admin: Set Student Fees
 export const setStudentFee = async (req, res) => {
   try {
-    const { envNumber, feeAmount, route } = req.body;
+    const { envNumber, feeAmount, route, duration } = req.body;
 
-    if (!envNumber || !feeAmount || !route) {
-      console.error("Validation Error: Missing envNumber, feeAmount, or route in setStudentFee request.");
-      return res.status(400).json({ error: "envNumber, feeAmount, and route are required!" });
+    if (!envNumber || !feeAmount || !route || !duration) {
+      console.error("Validation Error: Missing envNumber, feeAmount, route, or duration in setStudentFee request.");
+      return res.status(400).json({ error: "envNumber, feeAmount, route, and duration are required!" });
+    }
+
+    if (!["1month", "6months", "1year"].includes(duration)) {
+      console.error(`Validation Error: Invalid duration ${duration}. Must be 1month, 6months, or 1year.`);
+      return res.status(400).json({ error: "Invalid duration. Must be 1month, 6months, or 1year." });
     }
 
     const student = await Student.findOne({ envNumber });
@@ -27,10 +32,14 @@ export const setStudentFee = async (req, res) => {
     if (fee) {
       fee.feeAmount = feeAmount;
       fee.route = route;
+      fee.duration = duration;
+      fee.isPaid = false; // Reset to unpaid on update
+      fee.paymentDate = null; // Clear payment date
+      fee.transactionId = null; // Clear transaction ID
       await fee.save();
       console.log(`✅ Fee updated successfully for envNumber: ${envNumber}`);
     } else {
-      fee = new Fee({ envNumber, studentName: student.name, feeAmount, route });
+      fee = new Fee({ envNumber, studentName: student.name, feeAmount, route, duration });
       await fee.save();
       console.log(`✅ New fee record created successfully for envNumber: ${envNumber}`);
     }
@@ -70,29 +79,29 @@ export const getStudentFee = async (req, res) => {
 // 📌 3. Student: Start Razorpay Payment
 export const createPayment = async (req, res) => {
   try {
-    const { envNumber } = req.body;
+    const { envNumber, duration } = req.body;
     
-    if (!envNumber) {
-      console.error("Validation Error: envNumber is required for createPayment.");
-      return res.status(400).json({ error: "envNumber is required!" });
+    if (!envNumber || !duration) {
+      console.error("Validation Error: envNumber and duration are required for createPayment.");
+      return res.status(400).json({ error: "envNumber and duration are required!" });
     }
 
-    const fee = await Fee.findOne({ envNumber });
+    const fee = await Fee.findOne({ envNumber, duration });
 
     if (!fee) {
-      console.error(`Payment Request Error: Fee record not found for envNumber ${envNumber}.`);
-      return res.status(404).json({ error: "Fee not found for this enrollment number." });
+      console.error(`Payment Request Error: Fee record not found for envNumber ${envNumber}, duration ${duration}.`);
+      return res.status(404).json({ error: "Fee not found for this enrollment number and duration." });
     }
     
     if (fee.isPaid) {
-      console.warn(`Payment Request Warning: Fee for envNumber ${envNumber} is already paid.`);
-      return res.status(400).json({ error: "Fee for this enrollment number is already paid." });
+      console.warn(`Payment Request Warning: Fee for envNumber ${envNumber}, duration ${duration} is already paid.`);
+      return res.status(400).json({ error: "Fee for this enrollment number and duration is already paid." });
     }
 
     const options = {
       amount: fee.feeAmount * 100, // Razorpay requires amount in paise
       currency: "INR",
-      receipt: `receipt_${envNumber}`,
+      receipt: `receipt_${envNumber}_${duration}`,
       payment_capture: 1, // Auto-capture the payment
     };
 
@@ -105,7 +114,7 @@ export const createPayment = async (req, res) => {
       key: process.env.RAZORPAY_KEY,
     });
 
-    console.log("✅ Razorpay Order Created:", order.id, "for envNumber:", envNumber);
+    console.log("✅ Razorpay Order Created:", order.id, "for envNumber:", envNumber, "duration:", duration);
   } catch (error) {
     console.error("Error in createPayment:", error);
     res.status(500).json({ error: error.message });
@@ -115,17 +124,17 @@ export const createPayment = async (req, res) => {
 // 📌 4. Verify Payment & Update Status
 export const verifyPayment = async (req, res) => {
   try {
-    const { envNumber, paymentId, orderId, signature } = req.body;
+    const { envNumber, duration, paymentId, orderId, signature } = req.body;
 
-    if (!envNumber || !paymentId || !orderId || !signature) {
-      console.error("Verification Error: Missing required fields in verifyPayment request body.", { envNumber, paymentId, orderId, signature });
+    if (!envNumber || !duration || !paymentId || !orderId || !signature) {
+      console.error("Verification Error: Missing required fields in verifyPayment request body.", { envNumber, duration, paymentId, orderId, signature });
       return res.status(400).json({ error: "Missing required payment verification details." });
     }
 
-    const fee = await Fee.findOne({ envNumber });
+    const fee = await Fee.findOne({ envNumber, duration });
 
     if (!fee) {
-      console.error(`Verification Error: Student fee record not found for envNumber: ${envNumber}.`);
+      console.error(`Verification Error: Student fee record not found for envNumber: ${envNumber}, duration: ${duration}.`);
       return res.status(404).json({ error: "Student fee record not found for verification." });
     }
 
@@ -152,7 +161,7 @@ export const verifyPayment = async (req, res) => {
     }
 
     if (fee.isPaid) {
-        console.warn(`Verification Warning: Fee for envNumber ${envNumber} (orderId: ${orderId}) is already marked as paid.`);
+        console.warn(`Verification Warning: Fee for envNumber ${envNumber}, duration ${duration} (orderId: ${orderId}) is already marked as paid.`);
         return res.status(200).json({ message: "Payment already verified and status updated.", fee });
     }
 
@@ -160,7 +169,7 @@ export const verifyPayment = async (req, res) => {
     fee.paymentDate = new Date();
     fee.transactionId = paymentId;
     await fee.save();
-    console.log(`✅ Payment successful and fee status updated for envNumber: ${envNumber}, Transaction ID: ${paymentId}`);
+    console.log(`✅ Payment successful and fee status updated for envNumber: ${envNumber}, duration: ${duration}, Transaction ID: ${paymentId}`);
 
     res.status(200).json({ message: "Payment successful", fee });
   } catch (error) {
@@ -223,3 +232,4 @@ export const getAllDepartments = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
