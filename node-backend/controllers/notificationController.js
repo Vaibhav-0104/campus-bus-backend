@@ -1,4 +1,3 @@
-// 📌 File: backend/controllers/notificationController.js
 import Notification from "../models/Notification.js";
 import sendPushNotification from "../config/firebase.js";
 
@@ -11,9 +10,9 @@ export const sendNotification = async (req, res) => {
   }
 
   // Validate recipients
-  const validRecipients = ["Students", "Drivers", "Both"];
+  const validRecipients = ["Students", "Drivers", "Parents", "Both"];
   if (!recipients.every(recipient => validRecipients.includes(recipient))) {
-    return res.status(400).json({ error: "Invalid recipient. Must be 'Students', 'Drivers', or 'Both'." });
+    return res.status(400).json({ error: "Invalid recipient. Must be 'Students', 'Drivers', 'Parents', or 'Both'." });
   }
 
   try {
@@ -32,15 +31,15 @@ export const sendNotification = async (req, res) => {
 
 // Get Notifications for a Specific User
 export const getUserNotifications = async (req, res) => {
-  const { role } = req.params; // 'Students' or 'Drivers'
+  const { role } = req.params; // 'Students', 'Drivers', or 'Parents'
 
   if (!role) {
     return res.status(400).json({ error: "Role is required!" });
   }
 
   // Validate role
-  if (!["Students", "Drivers"].includes(role)) {
-    return res.status(400).json({ error: "Invalid role. Must be 'Students' or 'Drivers'." });
+  if (!["Students", "Drivers", "Parents"].includes(role)) {
+    return res.status(400).json({ error: "Invalid role. Must be 'Students', 'Drivers', or 'Parents'." });
   }
 
   try {
@@ -65,8 +64,7 @@ export const getUserNotifications = async (req, res) => {
   }
 };
 
-
-// 📌 New: Get All Notifications (No Filtering by Role)
+// Get All Notifications (No Filtering by Role)
 export const getAllNotifications = async (req, res) => {
   try {
     const notifications = await Notification.find().sort({ date: -1 });

@@ -80,6 +80,8 @@ import studentRoutes from './routes/studentRoutes.js';
 import allocationRoutes from './routes/busAllocationRoutes.js';
 import notificationRoutes from "./routes/notificationsRoutes.js";
 import feeRoutes from "./routes/feeRoutes.js";
+import driverLocationRoutes from './routes/driverLocationRoutes.js'; // New import
+
 
 dotenv.config();
 
@@ -100,7 +102,7 @@ app.use('/api/uploads', express.static(path.join(path.resolve(), 'uploads')));
 app.use('/api/allocations', allocationRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/fees", feeRoutes);
-
+app.use('/api/driver-locations', driverLocationRoutes); // New route
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
