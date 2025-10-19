@@ -108,16 +108,34 @@ export const getLocationSharingStatus = async (req, res) => {
         // Validate driver exists
         const driver = await Driver.findById(driverId);
         if (!driver) {
-            return res.status(404).json({ message: 'Driver not found', shareStatus: false });
+            return res.status(404).json({ 
+                message: 'Driver not found', 
+                shareStatus: false,
+                latitude: null,
+                longitude: null,
+                address: ''
+            });
         }
 
         // Find location document
         const location = await DriverLocation.findOne({ driverId });
         if (!location) {
-            return res.status(200).json({ message: 'Location sharing not started', shareStatus: false });
+            return res.status(200).json({ 
+                message: 'Location sharing not started', 
+                shareStatus: false,
+                latitude: null,
+                longitude: null,
+                address: ''
+            });
         }
 
-        res.status(200).json({ message: 'Location sharing status retrieved', shareStatus: location.shareStatus });
+        res.status(200).json({ 
+            message: 'Location sharing status retrieved', 
+            shareStatus: location.shareStatus,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            address: location.address
+        });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
