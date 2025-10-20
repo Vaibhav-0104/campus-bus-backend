@@ -215,7 +215,7 @@ export const markAttendance = async (req, res) => {
     };
 
     try {
-      response = await retryAxios("https://campus-bus-backend-python.onrender.com/verify-face", form, {
+      response = await retryAxios("http://localhost:10000/verify-face", form, {
         headers: {
           ...form.getHeaders(),
           "Content-Length": formLength,
