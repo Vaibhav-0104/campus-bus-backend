@@ -1,3 +1,8 @@
-Flask==3.1.0
-deepface==0.0.93
-tensorflow-cpu==2.20.0
+flask
+deepface
+opencv-python
+numpy
+gunicorn
+tensorflow==2.15.0
+tf-keras==2.15.0
+pillow
