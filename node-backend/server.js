@@ -1,6 +1,3 @@
-// // 
-
-
 
 // import express from "express";
 // import mongoose from "mongoose";
@@ -8,8 +5,6 @@
 // import cors from "cors";
 // import path from "path";
 // import { fileURLToPath } from "url";
-
-// // Route Imports
 // import adminAuthRoutes from "./routes/adminRoutes.js";
 // import busRoutes from './routes/busRoutes.js';
 // import driverRoutes from './routes/driverRoutes.js';
@@ -103,6 +98,10 @@ app.use('/api/allocations', allocationRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/fees", feeRoutes);
 app.use('/api/driver-locations', driverLocationRoutes); // New route
+
+app.get("/", (req, res) => {
+  res.send("🚀 Campus Bus Backend running successfully on Render!");
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
